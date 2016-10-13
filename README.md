@@ -37,11 +37,11 @@ If you want to remove *all configuration files, certificates, private keys, and 
 Build a local image and run commands as in the previous case, but prefixed with the following Docker options:
 
     docker build -t simplvpn .
-    docker run --rm -v /your/config/dir/:/etc/openvpn/ simplvpn /etc/openvpn/simplvpn.sh init
+    docker run -it --rm -v /your/config/dir/:/etc/openvpn/ simplvpn /etc/openvpn/simplvpn.sh init
 
 Edit /your/config/dir/{server,client_template}.conf to suit your needs (at least the *remote* and *port* parts). Then issue certificates as needed and start your server:
 
-    docker run --rm -v /your/config/dir/:/etc/openvpn/ simplvpn /etc/openvpn/simplvpn.sh issue "your-client"
+    docker run -it --rm -v /your/config/dir/:/etc/openvpn/ simplvpn /etc/openvpn/simplvpn.sh issue "your-client"
     docker run -v /your/config/dir/:/etc/openvpn/ -p 9090:9090 --cap-add NET_ADMIN simplvpn openvpn-run.sh
 
 Finally, you only have to send /your/config/dir/your-client.ovpn to your client.
@@ -52,4 +52,8 @@ Finally, you only have to send /your/config/dir/your-client.ovpn to your client.
 2. Read the contents of this script, and understand at least its basic steps;
 3. As recommended in [simplca.sh](https://github.com/mtth-bfft/simplca), handle CA operations offline, or at least move
    client private keys and .ovpn profiles offline once they are generated.
+
+## Contributing
+
+I've tested this script and its generated configurations against OpenVPN Connect 1.1.{16,17} on Android 6.0.1, OpenVPN Connect 1.0.7 on iOS 9.3.5, NetworkManager 1.4.2 on Linux, and Tunnelblick 3.5.11 on Mac OS 10.6.8. Help by telling me if it works on other versions or platforms, otherwise open an issue with your logs.
 
