@@ -66,8 +66,8 @@ server 10.${VPN_SUBNET_ID}.0.0 255.255.255.0
 client-config-dir ${VPN_CLIENTS}/
 
 ; Tunnel everything through us (e.g. DNS)
-push "redirect-gateway"
-push "dhcp-option 8.8.8.8"
+push "redirect-gateway def1"
+push "dhcp-option DNS 8.8.8.8"
 
 ; Ping every 10s, disconnect after 2mins
 keepalive 10 120
@@ -97,10 +97,6 @@ resolv-retry infinite
 nobind
 persist-key
 persist-tun
-ca [inline]
-cert [inline]
-key [inline]
-tls-auth [inline] 1
 key-direction 1
 verb 4
 keepalive 10 120
