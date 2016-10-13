@@ -1,0 +1,4 @@
+ca/
+*.pem
+*.key
+*.conf
