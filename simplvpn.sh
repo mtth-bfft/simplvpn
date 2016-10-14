@@ -79,9 +79,9 @@ group nobody
 persist-key
 persist-tun
 
-;status /var/log/openvpn-status.log
-;log-append /var/log/openvpn.log
-verb 4
+;status /var/log/openvpn/openvpn-status.log
+;log-append /var/log/openvpn/openvpn.log
+verb 3
 mute 20
 EOF
 }
@@ -98,7 +98,7 @@ nobind
 persist-key
 persist-tun
 key-direction 1
-verb 4
+verb 3
 keepalive 10 120
 comp-lzo
 cipher AES-128-CBC
