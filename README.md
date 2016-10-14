@@ -34,15 +34,14 @@ If you want to remove *all configuration files, certificates, private keys, and 
 
 ### With Docker:
 
-Build a local image and run commands as in the previous case, but prefixed with the following Docker options:
+Run commands as in the previous case, but prefixed with the following Docker options:
 
-    docker build -t simplvpn .
-    docker run -it --rm -v /your/config/dir/:/etc/openvpn/ simplvpn /etc/openvpn/simplvpn.sh init
+    docker run -it --rm -v /your/config/dir/:/etc/openvpn/ mtthbfft/simplvpn /etc/openvpn/simplvpn.sh init
 
 Edit /your/config/dir/{server,client_template}.conf to suit your needs (at least the *remote* and *port* parts). Then issue certificates as needed and start your server:
 
-    docker run -it --rm -v /your/config/dir/:/etc/openvpn/ simplvpn /etc/openvpn/simplvpn.sh issue "your-client"
-    docker run -d -v /your/config/dir/:/etc/openvpn/ --restart unless-stopped -p 9090:9090 --cap-add NET_ADMIN simplvpn
+    docker run -it --rm -v /your/config/dir/:/etc/openvpn/ mtthbfft/simplvpn /etc/openvpn/simplvpn.sh issue "your-client"
+    docker run -d -v /your/config/dir/:/etc/openvpn/ --restart unless-stopped -p 9090:9090 --cap-add NET_ADMIN mtthbfft/simplvpn
 
 Finally, you only have to send /your/config/dir/your-client.ovpn to your client.
 
