@@ -81,7 +81,7 @@ persist-tun
 
 ;status /var/log/openvpn/openvpn-status.log
 ;log-append /var/log/openvpn/openvpn.log
-verb 3
+verb 2
 mute 20
 EOF
 }

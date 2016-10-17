@@ -1,4 +1,6 @@
 ca/
+clients/
 *.pem
 *.key
 *.conf
+*.ovpn
