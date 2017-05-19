@@ -20,4 +20,3 @@ iptables -t nat -F
 iptables -t nat -A POSTROUTING -j MASQUERADE
 
 exec openvpn --config /etc/openvpn/server.conf --management 127.0.0.1 8000
-

@@ -1,5 +1,7 @@
 ca/
-clients/
+configs/
+ip/
+*.local.sh
 *.pem
 *.key
 *.conf
