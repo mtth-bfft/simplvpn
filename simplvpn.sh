@@ -23,51 +23,54 @@
 # Configuration variables
 # (do not edit these, or your changes will be lost during updates:
 # instead put your customisations in a separate simplvpn.local.sh script)
-
-set -euo pipefail
-
-VPN_DIR=`pwd`
-CA_DIR="${VPN_DIR}/ca"
+CA_DIR="ca"
+SRV_DIR="srv"
 CA_SCRIPT="${CA_DIR}/simplca.sh"
 CA_LOCALCONF="${CA_DIR}/simplca.local.sh"
+CA_CRL="crl.pem"
 CA_SERVER_NAME="openvpn-server"
 VPN_DH_BITS=2048
 VPN_SUBNET_ID=73 # 1 to 255, change in case of collision
-VPN_CONFIGS="${VPN_DIR}/configs"
-VPN_IPCONFIGS="${VPN_DIR}/ip"
-VPN_KEYS="${VPN_DIR}/keys"
-VPN_SERVER_CONFIG="${VPN_CONFIGS}/server.conf"
-VPN_CLIENT_TEMPLATE="${VPN_CONFIGS}/client_template.conf"
-VPN_TLSAUTH="${VPN_KEYS}/ta.key"
-VPN_DH="${VPN_KEYS}/dh${VPN_DH_BITS}.pem"
+VPN_CLIENT_PROFILES="profiles"
+VPN_CLIENT_CONFIGS="configs"
+VPN_CLIENT_TEMPLATE="client_template.conf"
 
-[ -r ${VPN_DIR}/simplvpn.local.sh ] && source ${VPN_DIR}/simplvpn.local.sh
+# Site-local customisations
+[ -r simplvpn.local.sh ] && source simplvpn.local.sh
 
-function confirm_prompt {
-    [ $BATCH -eq 1 ] && return 0
+# Lists options and arguments on stderr
+function vpn_show_usage {
+    echo "Usage: $0 init" >&2
+    echo "       $0 issue <alphanumeric_id>" >&2
+    echo "       $0 revoke <alphanumeric_id>" >&2
+    echo "       $0 get-status <alphanumeric_id>" >&2
+    echo "       $0 get-ip <alphanumeric_id>" >&2
+    echo "       $0 list" >&2
+    echo "       $0 cleanup" >&2
+}
+
+# Prompts for y/N confirmation if shell is interactive, otherwise assumes yes
+function vpn_confirm_prompt {
+    [ -t 0 ] || return 0
+    case "$-" in
+        *i*) return 0 ;;
+    esac
     echo -n "${1:-Continue?} [y/N] " >&2
     read -r -n1 yn
     echo >&2
     case $yn in
         [yY]) return 0 ;;
-        *) return 1 ;;
     esac
+    return 1
 }
 
-function show_usage {
-    echo "Usage: $0 init [-y]" >&2
-    echo "       $0 issue <alphanumeric_id> [-y] " >&2
-    echo "       $0 revoke <alphanumeric_id> [-y] " >&2
-    echo "       $0 list" >&2
-    echo "       $0 cleanup [-y] " >&2
+# Displays the given error message on stderr
+function vpn_warn {
+    echo "Error: $@" >&2
 }
 
-function die {
-    echo "Error: $1" >&2
-    exit 1
-}
-
-function ca_run_cmd {
+# Runs simplca.sh with the given arguments
+function vpn_run_ca_cmd {
     local prev=`pwd`
     cd "$CA_DIR"
     ./simplca.sh $@
@@ -76,7 +79,8 @@ function ca_run_cmd {
     return $res
 }
 
-function gen_server_conf {
+# Outputs an OpenVPN server configuration file on stdout, given global variables
+function vpn_gen_server_conf {
     cat <<EOF
 proto tcp
 port 9090
@@ -84,17 +88,17 @@ port 9090
 dev tun
 topology subnet
 
-ca $(ca_run_cmd get-cert ca)
-cert $(ca_run_cmd get-cert "$CA_SERVER_NAME")
-key $(ca_run_cmd get-key "$CA_SERVER_NAME")
-dh ${VPN_DH}
-tls-auth ${VPN_TLSAUTH} 0
-crl-verify ${CA_DIR}/crl.pem
+ca ca.pem
+cert ${CA_SERVER_NAME}.pem
+key ${CA_SERVER_NAME}.key
+dh dh${VPN_DH_BITS}.pem
+tls-auth ta.key 0
+crl-verify crl.pem
 
 cipher AES-128-CBC
 
 server 10.${VPN_SUBNET_ID}.0.0 255.255.255.0
-client-config-dir ${VPN_IPCONFIGS}/
+client-config-dir ${VPN_CLIENT_CONFIGS}/
 
 ; Tunnel everything through us (e.g. DNS)
 push "redirect-gateway def1"
@@ -110,14 +114,13 @@ group nobody
 persist-key
 persist-tun
 
-;status /var/log/openvpn/openvpn-status.log
-;log-append /var/log/openvpn/openvpn.log
 verb 2
 mute 20
 EOF
 }
 
-function gen_client_template {
+# Outputs the common part of all OpenVPN client configurations on stdout.
+function vpn_gen_client_template {
     cat <<EOF
 client
 dev tun
@@ -137,151 +140,146 @@ remote-cert-tls server
 EOF
 }
 
-# Takes a client ID and outputs a configuration file for that client
-function gen_client_conf {
-    CA=$(ca_run_cmd get-cert ca)
-    CERT=$(ca_run_cmd get-cert "$1")
-    KEY=$(ca_run_cmd get-key "$1")
+# Takes a client ID and outputs a configuration file for that client on stdout.
+function vpn_gen_client_conf {
     cat "${VPN_CLIENT_TEMPLATE}"
     cat <<EOF
 <ca>
-$(cat "$CA")
+$(cat "${CA_DIR}/certs/ca.pem")
 </ca>
 <cert>
-$(cat "$CERT")
+$(cat "${CA_DIR}/certs/$1.pem")
 </cert>
 <key>
-$(cat "$KEY")
+$(cat "${CA_DIR}/keys/$1.key")
 </key>
 <tls-auth>
-$(cat "$VPN_TLSAUTH")
+$(cat "${SRV_DIR}/ta.key")
 </tls-auth>
 EOF
 }
 
-function vpn_exists {
-    [ -d ${CA_DIR} ] && return 0
-    [ -d ${VPN_CONFIGS} ] && return 0
-    [ -d ${VPN_IPCONFIGS} ] && return 0
-    [ -d ${VPN_KEYS} ] && return 0
-    return 1
-}
-
+# Removes all state (configuration files, profiles, keys, certificates) from
+# the current folder.
 function vpn_cleanup {
-    if vpn_exists && ! confirm_prompt "About to overwrite CA and configuration files. Continue?"; then
-        die "user abort, no modification"
-    fi
-    rm -rf "$CA_DIR" "$VPN_CONFIGS" "$VPN_IPCONFIGS" "$VPN_KEYS"
+    [ -d "$VPN_CLIENT_PROFILES" -o -d "$VPN_CLIENT_CONFIGS" -o -d "$SRV_DIR" ] || return 0 
+    vpn_confirm_prompt "About to REMOVE ALL CERTIFICATES AND KEYS. Continue?" || return 1
+    rm -rf "$SRV_DIR" "$VPN_CLIENT_PROFILES" "$VPN_CLIENT_CONFIGS" "$VPN_CLIENT_TEMPLATE"
+    [ -x "$CA_SCRIPT" ] && vpn_run_ca_cmd cleanup 0<&-
     echo "VPN configuration successfully reset to an empty state" >&2
 }
 
 function vpn_init {
     vpn_cleanup
-    git clone https://github.com/mtth-bfft/simplca.git "${CA_DIR}"
+    if ! [ -d "$CA_DIR" ] && ! which git &>/dev/null; then
+        vpn_warn "please install git or manually clone https://github.com/mtth-bfft/simplca"
+        return 1
+    fi
+    [ -d "$CA_DIR" ] || git clone https://github.com/mtth-bfft/simplca.git "$CA_DIR"
     # Override the default CRL duration: only the server uses the CRL,
     # so we're guaranteed it will have the latest version. Reducing this
     # would only add maintenance overhead.
-    echo "#!/bin/sh" > ${CA_LOCALCONF}
-    echo "CRT_DURATION=3650 # days" >> ${CA_LOCALCONF}
-    echo "CRL_DURATION=3650 # days" >> ${CA_LOCALCONF}
-    ca_run_cmd init -y
-    ca_run_cmd issue-server "$CA_SERVER_NAME" -y >/dev/null
-    mkdir -p "$VPN_CONFIGS" "$VPN_KEYS" "$VPN_IPCONFIGS"
-    openssl dhparam -out "$VPN_DH" "$VPN_DH_BITS"
-    openvpn --genkey --secret "$VPN_TLSAUTH"
-    sed -i -r -e 's/^#.*$//' -e '/^$/d' "$VPN_TLSAUTH"
-    gen_server_conf > "$VPN_SERVER_CONFIG"
-    gen_client_template > "$VPN_CLIENT_TEMPLATE"
-    chmod -R 0600 "$VPN_KEYS"
+    echo "#!/bin/sh" > "$CA_LOCALCONF"
+    echo "CRT_DURATION=3650 # days" >> "$CA_LOCALCONF"
+    echo "CRL_DURATION=3650 # days" >> "$CA_LOCALCONF"
+    echo "CA_CRL='../${SRV_DIR}/crl.pem'" >> "$CA_LOCALCONF"
+    mkdir -p "$SRV_DIR" "$VPN_CLIENT_PROFILES" "$VPN_CLIENT_CONFIGS"
+    vpn_run_ca_cmd init || return $?
+    vpn_run_ca_cmd issue server "$CA_SERVER_NAME" >/dev/null 0<&- || return $?
+    cp "${CA_DIR}/certs/ca.pem" "$SRV_DIR"
+    cp "${CA_DIR}/certs/${CA_SERVER_NAME}.pem" "$SRV_DIR"
+    cp "${CA_DIR}/keys/${CA_SERVER_NAME}.key" "$SRV_DIR"
+    openssl dhparam -out "${SRV_DIR}/dh${VPN_DH_BITS}.pem" "$VPN_DH_BITS"
+    openvpn --genkey --secret "${SRV_DIR}/ta.key"
+    sed -i -r -e 's/^#.*$//' -e '/^$/d' "${SRV_DIR}/ta.key"
+    vpn_gen_server_conf > "${SRV_DIR}/server.conf"
+    vpn_gen_client_template > "$VPN_CLIENT_TEMPLATE"
+    chmod -R 0600 "$CA_DIR" "$SRV_DIR" "$VPN_CLIENT_PROFILES" \
+        "$VPN_CLIENT_CONFIGS" "$VPN_CLIENT_TEMPLATE"
+    chmod o+x "$CA_SCRIPT"
     echo "VPN successfully configured" >&2
 }
 
+# Takes an alphanumeric client ID and outputs its associated IP on stdout.
+# Returns 0 if and only if successful.
 function vpn_get_client_ip {
-    [ -f "${VPN_IPCONFIGS}/$1" ] || die "identifier not found"
-    cat "${VPN_IPCONFIGS}/$1" | grep ifconfig-push | awk '{ print $2 }'
+    [ $# -eq 1 ] && [ -n "$1" ] || { vpn_warn "vpn_get_client_ip requires an ID"; return 1; }
+    [ -f "${VPN_CLIENT_CONFIGS}/$1" ] || { vpn_warn "identifier not found"; return 2; }
+    cat "${VPN_CLIENT_CONFIGS}/$1" | grep ifconfig-push | awk '{ print $2 }' || return $?
 }
 
-# Returns 0 if client ID found and valid, 1 if not found, 2 if it was revoked
+# Takes an alphanumeric client ID and outputs its status amongst
+# ok/revoked/expired on stdout. Returns 0 if and only if certificate is valid.
 function vpn_get_status {
-    vpn_exists || die "please initialise your VPN configuration first"
-    ca_run_cmd get-status "$1"
+    vpn_run_ca_cmd get-status "$1" || return $?
 }
 
+# Outputs a list of all clients on stdout. Always returns 0.
 function vpn_list {
-    vpn_exists || die "please initialise your VPN configuration first"
-    echo -e "status\tIP      \tidentifier"
-    for config in $(find "$VPN_CONFIGS" -type f -name "*.ovpn"); do
-        clientid=$(basename "$config" | sed -r 's#\.ovpn$##')
-        vpn_get_status "$clientid" &>/dev/null && status="valid" || status="revoked"
+    echo -e "status \tIP            \tidentifier"
+    IFS=$'\n'; for line in $(vpn_run_ca_cmd list | sed '1d'); do
+        [ "$(echo "$line" | cut -f1)" != 'client' ] && continue;
+        status=$(echo "$line" | cut -f2)
+        clientid=$(echo "$line" | cut -f3)
         echo -e "${status}\t$(vpn_get_client_ip "$clientid")\t${clientid}"
     done
 }
 
+# Takes an alphanumeric client iD and issues a new certificate for it. Outputs
+# the associated client profile on stdout. Returns 0 if and only if successful.
 function vpn_issue {
-    vpn_exists || die "please initialise your VPN configuration first"
-    CLIENTNB=$(ls -l ${VPN_CONFIGS}/*.ovpn 2>/dev/null | wc -l || true)
-    IPADDR="10.${VPN_SUBNET_ID}.0.$(($CLIENTNB + 1))"
-    [ -f "${VPN_CONFIGS}/${CLIENTID}.ovpn" ] && die "client ID in use, please choose another."
-    if ! confirm_prompt "About to issue a client certificate for '${CLIENTID}'. Continue?"; then
-        die "user abort, no modification"
+    [ $# -eq 1 ] || { vpn_warn "vpn_issue requires an ID"; return 1; }
+    local clientnb=$(ls -l ${VPN_CLIENT_PROFILES}/*.ovpn 2>/dev/null | wc -l || true)
+    local ip="10.${VPN_SUBNET_ID}.0.$(($clientnb + 1))"
+    if [ -f "${VPN_CLIENT_PROFILES}/$1.ovpn" ]; then
+        vpn_warn "client ID in use, please choose another."
+        return 1
+    elif  ! vpn_confirm_prompt "About to issue a client certificate for '$1'. Continue?"; then
+        vpn_warn "user abort, no modification"
+        return 2
     fi
-    ca_run_cmd issue-client "$CLIENTID" -y >&2
-    # Static IP address assignment (accountability)
-    echo "ifconfig-push ${IPADDR} 255.255.255.0" > "${VPN_IPCONFIGS}/${CLIENTID}"
-    gen_client_conf "$CLIENTID" | tee "${VPN_CONFIGS}/${CLIENTID}.ovpn"
-    echo "Client configuration written to ${VPN_CONFIGS}/${CLIENTID}.ovpn (assigned IP ${IPADDR})" >&2
+    vpn_run_ca_cmd issue client "$1" >&2 0<&- || return $?
+    echo "ifconfig-push ${ip} 255.255.255.0" > "${VPN_CLIENT_CONFIGS}/$1"
+    vpn_gen_client_conf "$1" | tee "${VPN_CLIENT_PROFILES}/$1.ovpn"
+    echo "Client configuration written to ${VPN_CLIENT_PROFILES}/$1.ovpn (assigned IP ${ip})" >&2
 }
 
+# Takes an alphanumeric client ID and revokes its certificate.
+# Returns 0 if and only if successful.
 function vpn_revoke {
-    vpn_exists || die "please initialise your VPN configuration first"
-    vpn_get_status "$1" &>/dev/null || die "profile not found or already revoked"
-    confirm_prompt "About to revoke profile certificate for '${1}'. Continue?" || exit 1
-    ca_run_cmd revoke "$1" -y >&2
+    [ $# -eq 1 ] && [ -n "$1" ] || { vpn_warn "vpn_revoke requires an ID"; return 1; }
+    if ! vpn_get_status "$1" &>/dev/null; then
+        vpn_warn "profile not found or already revoked"
+        return 2
+    fi
+    vpn_confirm_prompt "About to revoke profile '${1}'. Continue?" || return 3
+    vpn_run_ca_cmd revoke "$1" >&2 0<&- || return $?
     echo "Client profile revoked successfully" >&2
 }
 
 function vpn_main {
-    [ $# -gt 0 ] || { show_usage ; exit 1; }
-
-    # Read command from first argument
-    CMD=$1
-    CLIENTID=''
-    shift
-    case $CMD in
+    [ $# -gt 0 ] || { vpn_show_usage ; exit 1; }
+    case "$1" in
         issue|revoke|get-ip|get-status)
-            [ $# -gt 0 ] || die "command $CMD requires an identifier as argument"
-            echo "$1" | grep -qE '^[a-zA-Z0-9_-]+$' || die "invalid identifier for command $CMD"
-            CLIENTID="$1"
-            shift ;;
+            [ $# -eq 2 ] || { vpn_show_usage; exit 2; };;
+        *) [ $# -eq 1 ] || { vpn_show_usage; exit 2; };;
     esac
-
-    # Read optional arguments
-    BATCH=0
-    while [ $# -gt 0 ]; do
-        case $1 in
-            -h|--help) show_usage; exit 0 ;;
-            -y|--yes) BATCH=1 ;;
-            *) die "unknown option '$1'" ;;
-        esac
-        shift
-    done
-
-    # Call the appropriate function
-    case $CMD in
+    case "$1" in
         init) vpn_init ;;
-        list) vpn_list ;;
-        issue) vpn_issue "$CLIENTID" ;;
-        revoke) vpn_revoke "$CLIENTID" ;;
-        get-ip) vpn_get_client_ip "$CLIENTID" ;;
-        get-status) vpn_get_status "$CLIENTID" ;;
+        issue) vpn_issue "$2" ;;
+        revoke) vpn_revoke "$2" ;;
+        get-status) vpn_get_status "$2" ;;
+        get-ip) vpn_get_client_ip "$2" ;;
         list) vpn_list ;;
         cleanup) vpn_cleanup ;;
-        *) show_usage ; exit 1 ;;
+        *) vpn_warn "unknown command '$1'"; vpn_show_usage ; exit 1 ;;
     esac
 }
 
-# Check that OpenVPN is installed (needed by vpn_init to generate a PSK)
-which openvpn &>/dev/null || die "please install OpenVPN before proceeding"
+if ! which openvpn &>/dev/null; then
+    vpn_warn "please install OpenVPN before proceeding"
+    exit 1
+fi
 case "$0" in
-	*simplvpn.sh*) vpn_main $@ ;;
+    *simplvpn.sh*) vpn_main $@ ;;
 esac # otherwise, script is being sourced

@@ -16,15 +16,15 @@ Initialise a certification authority, a server configuration, and a client confi
 
     ./simplvpn.sh init
 
-Modify server.conf and client_template.conf (you will especially need to setup the *remote* and *port* parts, but you might want to disable compression, change the cipher suite, etc.)
+Modify `server.conf` and `client_template.conf` (you will especially need to setup the *remote* and *port* parts, but you might want to disable compression, change the cipher suite, etc.)
 
-Issue certificates and create all-in-one profiles for each of your clients (each must have a unique ID containing only letters, digits, underscores and dashes):
+Issue certificates and create all-in-one configuration files for each of your clients (each must have a unique ID containing only letters, digits, underscores and dashes):
 
     ./simplvpn.sh issue "my-client-name"
-    ./simplvpn.sh issue "another-explicit-id"
+    ./simplvpn.sh issue "another-self-explanatory-id"
     ./simplvpn.sh list
 
-If a client profile or private key gets leaked, or if you password-protect it and lose the password, you might want to prevent that profile from being used:
+If a client profile or private key gets leaked, or if you lose access to it, you might want to prevent that profile from being used:
 
     ./simplvpn.sh revoke "my-client-name"
 
@@ -36,14 +36,11 @@ If you want to remove *all configuration files, certificates, private keys, and 
 
 Run commands as in the previous case, but prefixed with the following Docker options:
 
-    docker run -it --rm -v /your/config/dir/:/etc/openvpn/ mtthbfft/simplvpn /etc/openvpn/simplvpn.sh init
-
-Edit /your/config/dir/{server,client_template}.conf to suit your needs (at least the *remote* and *port* parts). Then issue certificates as needed and start your server:
-
+    docker run -it --rm -v /your/config/dir/:/etc/openvpn/ mtthbfft/simplvpn init
     docker run -it --rm -v /your/config/dir/:/etc/openvpn/ mtthbfft/simplvpn /etc/openvpn/simplvpn.sh issue "your-client"
     docker run -d -v /your/config/dir/:/etc/openvpn/ --restart unless-stopped -p 9090:9090 --cap-add NET_ADMIN mtthbfft/simplvpn
 
-Finally, you only have to send /your/config/dir/your-client.ovpn to your client.
+Finally, you only have to send an all-in-one `.ovpn` file to your client.
 
 ## Recommendations:
 
